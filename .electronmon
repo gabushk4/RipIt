@@ -1,0 +1,11 @@
+{
+    "watch": [
+        "*.js",
+        "*.html", 
+        "*.css",
+        "server.py"
+    ],
+    "ignore": [
+        "history.db"
+    ]
+}

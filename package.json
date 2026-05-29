@@ -1,0 +1,13 @@
+{
+  "name": "ytdl-app",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electronmon ."
+  },
+  "devDependencies": {
+    "electron": "^42.3.0",
+    "electronmon": "^2.0.4"
+  }
+}
