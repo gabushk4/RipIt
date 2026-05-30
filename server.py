@@ -4,14 +4,14 @@ Requiert : pip install flask flask-cors
 Requiert : ffmpeg installé sur le système
 """
 
-import subprocess, tempfile, shutil, os, yt_dlp, queue, threading, sqlite3, uuid, json
+import subprocess, tempfile, shutil, os, yt_dlp, queue, threading, sqlite3, uuid, json, sys
 from pathlib import Path
 from flask import Flask, request, send_file, jsonify, json, Response, stream_with_context
 from flask_cors import CORS
 
 
 app = Flask(__name__)
-db = sqlite3.connect("ytdl.db") 
+DB_FILE = "data/ripit.db"
 progress_queues = {}
 job_results = {}
 
@@ -35,48 +35,52 @@ CODEC_MAP = {
 # ── Utils ─────────────────────────────────────────────────────────────────────
 def check_ffmpeg():
     """Vérifie que FFmpeg est installé et accessible."""
+    # Mode PyInstaller freezé
+    if getattr(sys, 'frozen', False):
+        name = 'ffmpeg.exe' if sys.platform == 'win32' else 'ffmpeg'
+        path = os.path.join(sys._MEIPASS, name)
+        if os.path.exists(path):
+            return path
+        raise EnvironmentError("FFmpeg introuvable dans l'application.")
+    # Mode dev normal
     result = shutil.which('ffmpeg')
     if result is None:
-        raise EnvironmentError("FFmpeg introuvable. Installe-le avec : brew install ffmpeg (Mac) ou sudo apt install ffmpeg (Linux)")
+        raise EnvironmentError("FFmpeg introuvable. Installe-le avec : brew install ffmpeg (Mac) | sudo apt install ffmpeg (Linux) | https://www.gyan.dev/ffmpeg/builds/ (Windows)")
     return result
 
 def build_ffmpeg_cmd(input_path: str, output_path: str, fmt: str, bitrate: str, samplerate: str, channels: str) -> list:
     """Construit la commande FFmpeg."""
     codec = CODEC_MAP[fmt]
-
     cmd = [
-        'ffmpeg',
-        '-y',              # overwrite sans demander
+        check_ffmpeg(),
+        '-y',
         '-i', input_path,
-        '-vn',             # pas de vidéo
+        '-vn',
         '-ar', samplerate,
         '-ac', channels,
         '-c:a', codec,
     ]
-
-    # Le FLAC est lossless, pas de bitrate
     if fmt != 'flac':
         cmd += ['-b:a', bitrate]
-
     cmd.append(output_path)
     return cmd
-
-def init_db():
-    cur = db.cursor()
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS  history(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ytb_id TEXT UNIQUE NOT NULL,
-            title TEXT NOT NULL,
-            downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    ''')
-    db.commit()
-
 def get_db():
-    db = sqlite3.connect("ytdl.db") 
+    db = sqlite3.connect(DB_FILE) 
     db.row_factory = sqlite3.Row
     return db 
+
+def init_db():
+    with get_db() as db:
+        cur = db.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS  history(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ytb_id TEXT UNIQUE NOT NULL,
+                title TEXT NOT NULL,
+                downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+        db.commit()
 
 def download_worker(job_id, url, fmt, bitrate, samplerate, channels, output_dir):
     tmp_dir = tempfile.mkdtemp()

@@ -14,6 +14,7 @@ const clearBtn    = document.getElementById('clear-btn');
 const progressWrap = document.getElementById('progress-wrap');
 const progressFill = document.getElementById('progress-fill');
 const progressText = document.getElementById('progress-text');
+const phaseText = document.getElementById('phase-text')
 const summaryEl   = document.getElementById('summary');
 const formatSel   = document.getElementById('format');
 const bitrateGroup = document.getElementById('bitrate-group');
@@ -280,7 +281,7 @@ async function startDownload() {
   for (const item of queue) {
     try {
       progressText.textContent = `${done} / ${total}`;
-      progressFill.style.width = `${((done) / total) * 100}%`;
+      
       let videoDatas;
       // Fetch les infos et met à jour la card
       try {
@@ -294,22 +295,30 @@ async function startDownload() {
 
       const job_id = await downloadSingle(item.url, format, bitrate, samplerate, channels, item.title, folder);
       // Listens to the progress
-      await new Promise((resolve, reject) => {
+      await new Promise( (resolve, reject) => {
         const eventSource = new EventSource(`${API_BASE}/progress/${job_id}`)
 
         eventSource.onopen = () => console.log("SSE connecte", job_id)
         eventSource.onerror = (e) => console.log("SSE erreur", e)
 
-        eventSource.onmessage = (e) => {
+        eventSource.onmessage = async (e) => {
           const data = JSON.parse(e.data)
           if (data.phase === 'downloading') {
-            progressText.textContent = `Téléchargement ${data.percent} — ${data.eta}`
+            phaseText.textContent = `Téléchargement — ${data.eta}`
+            progressFill.style.width = data.percent;
           } else if (data.phase === 'converting') {
-            progressText.textContent = `Conversion en cours...`
+            progressFill.style.background = "orange"
+            phaseText.textContent = `Conversion en cours...`
+            phaseText.style.color = "orange"
           } else if (data.done) {
+            phaseText.style.color = "#888"
+            progressFill.style.background = "#378ADD"
+            progressFill.style.width = "0%";
+            phaseText.textContent = `Complété`
             eventSource.close()
-            window.location.href = `${API_BASE}/result/${job_id}`
+            await fetch(`${API_BASE}/result/${job_id}`) // cleanup serveur
             resolve()
+            done++
           }
         }
         eventSource.onerror = () => {

@@ -4,10 +4,45 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electronmon ."
+    "dev": "electronmon .",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac"
+  },
+  "electronmon": {
+    "watch": ["*.js", "*.html", "*.css", "server.py"],
+    "ignore": ["**/*.db", "data/**"]
+  },
+  "build": {
+    "appId": "com.ripit.app",
+    "productName": "RipIt",
+    "files": [
+      "main.js",
+      "preload.js",
+      "views/**",
+      "assets/**"
+    ],
+    "extraResources": [
+      {
+        "from": "server.exe",
+        "to": "server.exe"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "extraResources": [
+        { "from": "server.exe", "to": "server.exe" }
+      ]
+    },
+    "mac": {
+      "target": "dmg",
+      "extraResources": [
+        { "from": "server", "to": "server" }
+      ]
+    }
   },
   "devDependencies": {
     "electron": "^42.3.0",
-    "electronmon": "^2.0.4"
+    "electronmon": "^2.0.4",
+    "electron-builder": "^25.0.0"
   }
 }

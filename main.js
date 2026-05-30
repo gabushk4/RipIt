@@ -6,12 +6,16 @@ let mainWindow
 let pythonProcess
 let keepAlive;
 
+const isDev = !app.isPackaged
+
+const serverPath = isDev
+    ? path.join(__dirname, 'server.py')  // dev
+    : path.join(process.resourcesPath, 'server.exe')  // prod
+
 // Starts python server used for ytb conversion
 // Callback is called after success and error
 function startPython(callback) {
     let callbackCalled = false
-
-    // So the callback doesnt get called two times
     function safeCallback() {
         if (!callbackCalled) {
             callbackCalled = true
@@ -19,10 +23,17 @@ function startPython(callback) {
         }
     }
 
-    pythonProcess = spawn('python', ['server.py'], {
-        cwd: __dirname,
-        env: { ...process.env, PYTHONUNBUFFERED: '1' }  // To see prints in real time
-    })
+    if (isDev) {
+        pythonProcess = spawn('python', [serverPath], {
+            cwd: __dirname,
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        })
+    } else {
+        pythonProcess = spawn(serverPath, [], {
+            cwd: process.resourcesPath,
+            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        })
+    }
 
     pythonProcess.stdout.on('data', (data) => {
         console.log(`Python: ${data}`)
@@ -34,15 +45,12 @@ function startPython(callback) {
             safeCallback()
         }
     })
-
     pythonProcess.stderr.on('data', (data) => {
         console.error(`Python error: ${data}`)
         if (data.toString().includes('Running on')) {
             safeCallback()
         }
     })
-
-    // Fallback — opens after 3 seconds no matter what
     setTimeout(safeCallback, 3000)
 }
 // Keeps the py server alive
@@ -95,6 +103,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (pythonProcess) pythonProcess.kill()
+  if (pythonProcess) pythonProcess.kill('SIGINIT')
   app.quit()
 })

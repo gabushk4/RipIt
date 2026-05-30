@@ -187,10 +187,22 @@ button:hover{
 }
 
 /* Progress bar */
+#phase-text{
+  font-size: 13px;
+  color: #888;
+  margin-left: auto;
+}
 #progress-text {
   font-size: 13px;
   color: #888;
   margin-left: auto;
+}
+
+#progress-texts-container{
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .progress-bar-wrap {
