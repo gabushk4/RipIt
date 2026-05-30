@@ -9,12 +9,9 @@ let keepAlive;
 const isDev = !app.isPackaged
 
 const serverBin = process.platform === 'win32' ? 'server.exe' : 'server'
-
 const serverPath = isDev
     ? path.join(__dirname, 'server.py')
     : path.join(process.resourcesPath, serverBin)
-
-
 
 // Starts python server used for ytb conversion
 // Callback is called after success and error
