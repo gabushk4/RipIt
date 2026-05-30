@@ -14,6 +14,7 @@ const clearBtn    = document.getElementById('clear-btn');
 const progressWrap = document.getElementById('progress-wrap');
 const progressFill = document.getElementById('progress-fill');
 const progressText = document.getElementById('progress-text');
+const progressContainer = document.getElementById(`progress-container`)
 const phaseText = document.getElementById('phase-text')
 const summaryEl   = document.getElementById('summary');
 const formatSel   = document.getElementById('format');
@@ -66,6 +67,7 @@ function clearAll() {
   clearInput()
   clearFile()
   summaryEl.style.display = "none"
+  progressContainer.style.display = "none"
 }
 
 function clearInput(){
@@ -243,15 +245,20 @@ async function downloadSingle(url, format, bitrate, samplerate, channels, title,
   if (title) formData.append('title', title);
 
   // Executes the download
-  const { job_id } = await fetch(`${API_BASE}/download`, { method: 'POST', body: formData })
+  const result = await fetch(`${API_BASE}/download`, { method: 'POST', body: formData })
     .then(r => r.json())
-    .catch(err =>{
-      console.log("erreur a l'initialisation du telechargement", err)
+    .catch(err => {
+        console.log("erreur a l'initialisation du telechargement", err)
+        return null
     })
-  console.log("Job id: ", job_id)
+
+  if (!result || !result.job_id) {
+      throw new Error('Impossible de contacter le serveur')
+  }
+
+const { job_id } = result
   
-  return job_id
-  
+  return job_id  
 }
 
 async function startDownload() {
@@ -262,7 +269,7 @@ async function startDownload() {
 
   convertBtn.disabled = true;
   summaryEl.style.display = 'none';
-  progressWrap.style.display = 'block';
+  progressContainer.style.display = 'block';
 
   const format     = formatSel.value;
   const bitrate    = document.getElementById('bitrate').value;

@@ -8,9 +8,13 @@ let keepAlive;
 
 const isDev = !app.isPackaged
 
+const serverBin = process.platform === 'win32' ? 'server.exe' : 'server'
+
 const serverPath = isDev
-    ? path.join(__dirname, 'server.py')  // dev
-    : path.join(process.resourcesPath, 'server.exe')  // prod
+    ? path.join(__dirname, 'server.py')
+    : path.join(process.resourcesPath, serverBin)
+
+
 
 // Starts python server used for ytb conversion
 // Callback is called after success and error
@@ -35,6 +39,8 @@ function startPython(callback) {
         })
     }
 
+    console.log("server in ", serverPath)
+
     pythonProcess.stdout.on('data', (data) => {
         console.log(`Python: ${data}`)
         if (mainWindow) mainWindow.webContents.executeJavaScript(
@@ -51,7 +57,7 @@ function startPython(callback) {
             safeCallback()
         }
     })
-    setTimeout(safeCallback, 3000)
+    setTimeout(safeCallback, 5000)
 }
 // Keeps the py server alive
 // Sometimes it just stops listening to requests??
@@ -82,7 +88,8 @@ function createWindow() {
   })
 
   mainWindow.loadFile("./views/index.html")
-  mainWindow.webContents.openDevTools()
+  if(isDev)
+    mainWindow.webContents.openDevTools()
 }
 
 
@@ -103,6 +110,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  if (pythonProcess) pythonProcess.kill('SIGINIT')
-  app.quit()
+    clearInterval(keepAlive)
+    if (pythonProcess) pythonProcess.kill()
+    app.quit()
 })

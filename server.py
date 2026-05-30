@@ -11,7 +11,15 @@ from flask_cors import CORS
 
 
 app = Flask(__name__)
-DB_FILE = "data/ripit.db"
+
+if getattr(sys, 'frozen', False):
+    base_dir = os.path.join(os.path.expanduser('~'), '.ripit') # Uses AppData
+else:
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+os.makedirs(base_dir, exist_ok=True)
+DB_FILE = os.path.join(base_dir, 'ripit.db')
+
 progress_queues = {}
 job_results = {}
 
@@ -455,6 +463,12 @@ if __name__ == '__main__':
         print(f"  AVERTISSEMENT : {e}")
 
     init_db()
-
+    print(f"  Base de données : {DB_FILE}")
     print("=" * 50)
-    app.run(debug=True, port=5000, use_reloader=False)
+
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.INFO)
+
+    print("Running on http://127.0.0.1:5000")
+    app.run(debug=False, port=5000, use_reloader=False)
