@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Audio Batch Converter</title>
+  <title>RipIt</title>
   <link rel="stylesheet" href="../style.css">
   <link
       rel="stylesheet"
@@ -17,108 +17,105 @@
     />
 </head>
 <body>
-  <div id="app">
-    <header>
-      <h1>Youtube converter maison</h1>
-      <p class="subtitle">Convertis une vidéo youtube en MP3 320kbps via FFmpeg et YTdlp</p>
-    </header>
+    <div id="app">
+      <header>
+        <p class="subtitle">Convertis des vidéos youtube personnels via FFmpeg et YTdlp</p>
+      </header>
 
-    <div id="url-input-container">
-      <input id="url-input" type="text" name="url" placeholder="url de la video youtube"/>        
-      <button id="clear-input" class="ph ph-x-circle"></button>
-    </div>
-    <div id="message-container">
-      <p class="">
-        message        
-      </p>
-    </div>
-    <div id="drop-area">
-      <i id="drop-icon" class="ph ph-file"></i>
-      <p>Dépose ton fichier .txt ici</p>
-      <p>ou clique pour parcourir</p>
-      <input type="file" id="txt-input" accept=".txt" style="display: none;" />
-      <button onclick="document.getElementById('txt-input').click()">Choisir un fichier</button>
-    </div>
-
-    <div id="file-result" style="display: none;">
-      <p id="file-name"></p>
-      <p id="file-count"></p>
-      <button id="clear-files-btn">Retirer</button>
-    </div>
-
-    <div id="settings">
-      <div class="setting-group">
-        <label for="format">Format de sortie</label>
-        <select id="format">
-          <option value="mp3">MP3</option>
-          <option value="flac">FLAC (lossless)</option>
-          <option value="aac">AAC</option>
-          <option value="ogg">OGG Vorbis</option>
-        </select>
+      <div id="url-input-container">
+        <input id="url-input" type="text" name="url" placeholder="url de la video youtube"/>        
+        <button id="clear-input" class="ph ph-x-circle"></button>
       </div>
-      <div class="setting-group" id="bitrate-group">
-        <label for="bitrate">Bitrate</label>
-        <select id="bitrate">
-          <option value="320k" selected>320 kbps</option>
-          <option value="256k">256 kbps</option>
-          <option value="192k">192 kbps</option>
-          <option value="128k">128 kbps</option>
-        </select>
+      <div id="message-container" style="display: none;">
+        <p id="message" class="message error-message" >
+          message        
+        </p>
       </div>
-      <div class="setting-group">
-        <label for="samplerate">Sample rate</label>
-        <select id="samplerate">
-          <option value="44100">44100 Hz (CD)</option>
-          <option value="48000">48000 Hz</option>
-          <option value="96000">96000 Hz (Hi-Res)</option>
-        </select>
+      <div id="drop-area">
+        <i id="drop-icon" class="ph ph-file"></i>
+        <p>Glisse ton fichier .txt ici</p>
+        <p>ou clique pour parcourir</p>
+        <input type="file" id="txt-input" accept=".txt" style="display: none;" />
+        <button onclick="document.getElementById('txt-input').click()">Choisir un fichier</button>
       </div>
-      <div class="setting-group">
-        <label for="channels">Canaux</label>
-        <select id="channels">
-          <option value="2">Stéréo</option>
-          <option value="1">Mono</option>
-        </select>
+
+      <div id="file-result" style="display: none;">
+        <p id="file-name"></p>
+        <p id="file-count"></p>
+        <button id="clear-files-btn">Retirer</button>
+      </div>
+
+      <div id="settings">
+        <div class="setting-group">
+          <label for="format">Format de sortie</label>
+          <select id="format">
+            <option value="mp3">MP3</option>
+            <option value="flac">FLAC (lossless)</option>
+            <option value="aac">AAC</option>
+            <option value="ogg">OGG Vorbis</option>
+          </select>
+        </div>
+        <div class="setting-group" id="bitrate-group">
+          <label for="bitrate">Bitrate</label>
+          <select id="bitrate">
+            <option value="320k" selected>320 kbps</option>
+            <option value="256k">256 kbps</option>
+            <option value="192k">192 kbps</option>
+            <option value="128k">128 kbps</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <label for="samplerate">Sample rate</label>
+          <select id="samplerate">
+            <option value="44100">44100 Hz (CD)</option>
+            <option value="48000">48000 Hz</option>
+            <option value="96000">96000 Hz (Hi-Res)</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <label for="channels">Canaux</label>
+          <select id="channels">
+            <option value="2">Stéréo</option>
+            <option value="1">Mono</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="video-infos">
+        <div class="empty-state">
+          Les informations de la vidéo s'afficheront ici
+        </div>      
+      </div>
+
+      <div id="summary" style="display:none;"></div>
+
+      <div id="actions" style="display:none;">
+        <button id="convert-btn">Télécharger la vidéo</button>
+        <button id="clear-btn">Recommencer</button>
+        
+      </div>
+
+      <div class="progress-bar-wrap" id="progress-wrap" style="display:none;">
+        <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>
+        <span id="progress-text"></span>
+      </div>
+
+      <footer class="subtitle">
+        Fait par the Alkemist
+      </footer>
+    </div>
+
+    <!-- display historic of videos downloaded -->   
+    <div id="history">    
+      <i id="history-btn" class="ph ph-clock"></i>
+      <div id="history-list-container">
+        <h2>Historique</h2>
+        <p class="subtitle">L'historique des vidéos téléchargées</p>
+        <div id="history-list">
+          
+        </div>
       </div>
     </div>
-
-    <div id="video-infos">
-      <div class="empty-state">
-        Les informations de la vidéo s'afficheront ici
-      </div>      
-    </div>
-
-    <div id="summary" style="display:none;"></div>
-
-    <div id="actions" style="display:none;">
-      <button id="convert-btn">Télécharger la vidéo</button>
-      <button id="clear-btn">Recommencer</button>
-      
-    </div>
-
-    <div class="progress-bar-wrap" id="progress-wrap" style="display:none;">
-      <div class="progress-bar-fill" id="progress-fill" style="width:0%"></div>
-      <span id="progress-text"></span>
-    </div>
-
-    <footer class="subtitle">
-      Fait par the Alkemist
-    </footer>
-  </div>
-
-  
-  <!-- TODO: display historic of video downloaded -->
-  
-
-  <div id="history">    
-    <i id="history-btn" class="ph ph-clock"></i>
-    <div id="history-list">
-      <h2>Historique</h2>
-      <p class="subtitle">L'historique des vidéos téléchargées</p>
-    </div>
-  </div>
-
-
   <script src="../app.js"></script>
 </body>
 </html>

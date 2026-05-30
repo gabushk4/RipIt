@@ -6,6 +6,7 @@
         "server.py"
     ],
     "ignore": [
-        "history.db"
+        "*.db",
+        "ytdl.db"
     ]
 }

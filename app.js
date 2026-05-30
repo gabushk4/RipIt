@@ -18,6 +18,7 @@ const summaryEl   = document.getElementById('summary');
 const formatSel   = document.getElementById('format');
 const bitrateGroup = document.getElementById('bitrate-group');
 const dropArea     = document.getElementById('drop-area')
+const historyList = document.getElementById('history-list')
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function formatSize(bytes) {
@@ -30,10 +31,40 @@ function uid() {
   return Math.random().toString(36).slice(2);
 }
 
+async function getHistory(){
+  // Loading state
+  historyList.innerHTML = `
+    <div style="display: flex; justify-content: center; align-items: center; height:100%; ">
+      <div class="spinner"></div>
+    </div>
+  `
+  const res = await fetch(`${API_BASE}/history`)    
+  const data = await res.json()
+
+  console.log("history:", data.history)
+
+  if(data.history.length > 0)
+    historyList.innerHTML = `
+      ${data.history.map(video =>`
+        <div class="history-line">
+          <span class="line-title">${video.title}</span>
+          <span class="line-timestamp">${video.downloaded_at}</span>
+        </div>
+      `).join('')}
+    `
+  else
+    historyList.innerHTML = `
+      <div>
+        <p>Commencez à télécharger!</p>
+      </div>
+    `
+}
+
 // ── Input management ───────────────────────────────────────────────────────────
 function clearAll() {
   clearInput()
   clearFile()
+  summaryEl.style.display = "none"
 }
 
 function clearInput(){
@@ -64,10 +95,12 @@ async function renderThumbnail(url) {
 
   try {
     const formData = new FormData();
-    formData.append('url', url); // ← fix du bug
+    formData.append('url', url);
 
     const res = await fetch(`${API_BASE}/info`, { method: 'POST', body: formData });
     if (!res.ok){
+      const data = await res.json()
+      console.log("erreur:", data)
       let message = "Vidéo introuvable"
 
       container.innerHTML = `
@@ -93,9 +126,9 @@ async function renderThumbnail(url) {
       </div>
       <div id="video-meta">
         <p id="video-title">${data.title}</p>
-        <p id="video-uploader">mise en ligne par ${data.uploader || ''}</p>
+        <p id="video-uploader">mise en ligne par <span style="font-weight: bold;">${data.uploader || ''}</span></p>
         <div id="video-footer">
-          <p id="video-duration">durée ${duration} minutes</p>
+          <p id="video-duration">durée <span style="font-weight: bold;">${duration}</span> minutes</p>
         </div>
       </div>
     `;
@@ -107,7 +140,7 @@ async function renderThumbnail(url) {
     console.log("erreur RenderThumbnail", err)
     container.innerHTML = `
       <div class="empty-state error-state">
-        ❌ Impossible de récupérer les informations.<br>Vérifie l'URL.
+        Impossible de récupérer les informations.<br>Vérifie l'URL.
       </div>
     `;
   }
@@ -124,73 +157,108 @@ function renderEmptyState(){
   actions.style.display = 'none';
 }
 
-// ── Url input ───────────────────────────────────────────────────────────────
+function renderInputError(message){
+  const messageComponent = document.getElementById("message")
+  document.getElementById("message-container").style.display = "flex";
+  
+  messageComponent.textContent = message
+}
+
+function hideInputError(){
+  document.getElementById("message-container").style.display = "none";
+}
+
+// Url input 
 let debounceTimer;
 
 ['input', 'keydown'].forEach(eType => {
   urlInput.addEventListener(eType, (e) => {
     clearTimeout(debounceTimer);
-    const url = e.target.value.trim();
-    let cleanUrl = url
-    
-    // Which url type have we?
+    let url = e.target.value.trim();
 
-    if(url.includes("v")){        // Browser search bar type
-      console.log("search bar type url")
-
-    }
-    else if(url.includes("si")){  // Share type
-      console.log("share type url")
-    }
-
-    if (!url) {
-      renderEmptyState()
+    if (url.length < 1) {
+      hideInputError()
+      renderEmptyState();
       return;
     }
 
-    debounceTimer = setTimeout(() => renderThumbnail(url), 800); // attend 800ms après la dernière frappe
+    // Extract video ID
+    let videoId = null;
+
+    if (url.includes("v=")) {
+      // Search bar format : youtube.com/watch?v=ID&list=...
+      const match = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+      videoId = match ? match[1] : null;
+    }
+    else if (url.includes("youtu.be/")) {
+      // Share format : youtu.be/ID?si=...
+      const match = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+      videoId = match ? match[1] : null;
+    }
+    else if (url.includes("/shorts/")) {
+      // Shorts format : youtube.com/shorts/ID
+      const match = url.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+      videoId = match ? match[1] : null;
+    }
+    else if (url.includes("/embed/")) {
+      // Embed format : youtube.com/embed/ID
+      const match = url.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+      videoId = match ? match[1] : null;
+    }
+
+    if (!videoId) {
+      renderInputError("Lien invalide");
+      return;
+    }
+    else{
+      hideInputError()
+    }
+
+    // URL propre et canonique
+    const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    console.log("videoId:", videoId);
+    console.log("cleanUrl:", cleanUrl);
+
+    e.target.value = cleanUrl 
+
+    debounceTimer = setTimeout(() => renderThumbnail(cleanUrl), 800);
   });
 })
 
-// ── Format selector ───────────────────────────────────────────────────────────
+// Format selector
 formatSel.addEventListener('change', () => {
   bitrateGroup.style.display = formatSel.value === 'flac' ? 'none' : 'flex';
 });
 
-// ── Download ────────────────────────────────────────────────────────────────
-async function downloadSingle(url, format, bitrate, samplerate, channels, title) {
+// Download
+async function downloadSingle(url, format, bitrate, samplerate, channels, title, outputDir) {
   const formData = new FormData();
   formData.append('url', url);
   formData.append('format', format);
   formData.append('bitrate', bitrate);
   formData.append('samplerate', samplerate);
   formData.append('channels', channels);
+  formData.append('output_dir', outputDir);
   if (title) formData.append('title', title);
 
-  const res = await fetch(`${API_BASE}/download`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${res.status}`);
-  }
-
-  const blob = await res.blob();
-  const disposition = res.headers.get('Content-Disposition') || '';
-  const nameMatch = disposition.match(/filename="?([^"]+)"?/);
-  const filename = nameMatch ? nameMatch[1] : `converted.${format}`;
-
-  const objectUrl = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = objectUrl;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(objectUrl);
+  // Executes the download
+  const { job_id } = await fetch(`${API_BASE}/download`, { method: 'POST', body: formData })
+    .then(r => r.json())
+    .catch(err =>{
+      console.log("erreur a l'initialisation du telechargement", err)
+    })
+  console.log("Job id: ", job_id)
+  
+  return job_id
+  
 }
 
 async function startDownload() {
+  // Where should we put the video?
+  const folder = await window.electronAPI.chooseFolder();
+
+  console.log("output folder:", folder, typeof folder)
+
   convertBtn.disabled = true;
   summaryEl.style.display = 'none';
   progressWrap.style.display = 'block';
@@ -222,10 +290,33 @@ async function startDownload() {
         // Si /info échoue, on continue quand même le téléchargement
       }
 
-      console.log("downloading item: ", item.url, item.title, format, bitrate, samplerate, channels)
+      console.log("downloading item: ", item.url, item.title, format, bitrate, samplerate, channels, folder)
 
-      await downloadSingle(item.url, format, bitrate, samplerate, channels, item.title);
-      done++;
+      const job_id = await downloadSingle(item.url, format, bitrate, samplerate, channels, item.title, folder);
+      // Listens to the progress
+      await new Promise((resolve, reject) => {
+        const eventSource = new EventSource(`${API_BASE}/progress/${job_id}`)
+
+        eventSource.onopen = () => console.log("SSE connecte", job_id)
+        eventSource.onerror = (e) => console.log("SSE erreur", e)
+
+        eventSource.onmessage = (e) => {
+          const data = JSON.parse(e.data)
+          if (data.phase === 'downloading') {
+            progressText.textContent = `Téléchargement ${data.percent} — ${data.eta}`
+          } else if (data.phase === 'converting') {
+            progressText.textContent = `Conversion en cours...`
+          } else if (data.done) {
+            eventSource.close()
+            window.location.href = `${API_BASE}/result/${job_id}`
+            resolve()
+          }
+        }
+        eventSource.onerror = () => {
+          eventSource.close()
+          reject(new Error('Connexion SSE perdue'))
+        }
+      })
     } catch (err) {
       console.error(`Erreur pour ${item.url}:`, err);
       errors++;
@@ -299,12 +390,14 @@ document.getElementById('txt-input').addEventListener('change', (e) => handleFil
 // Manages the history component being slid in and out
 const histBtn = document.getElementById('history-btn')
 histBtn.addEventListener('click', ()=>{
+  // Lets fetch the users history
+  getHistory()
+
   const historyMenu = document.getElementById("history")
   historyMenu.classList.toggle('visible')
   histBtn.classList.contains('ph-clock')
     ? histBtn.classList.replace('ph-clock', 'ph-x')
-    : histBtn.classList.replace('ph-x', 'ph-clock')
-  
+    : histBtn.classList.replace('ph-x', 'ph-clock') 
   
 })
 

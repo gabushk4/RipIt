@@ -1,5 +1,7 @@
-const { contextBridge } = require('electron')
+const { contextBridge, ipcRenderer, shell } = require('electron')
+
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  platform: process.platform
+  platform: process.platform,
+  chooseFolder: () => ipcRenderer.invoke('choose-folder')
 })
