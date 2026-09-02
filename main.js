@@ -1,10 +1,13 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const { spawn } = require('child_process')
 const path = require('path')
+const net = require('net')
+const fs = require('fs')
 
 let mainWindow
 let pythonProcess
 let keepAlive;
+let APIPort;
 
 const isDev = !app.isPackaged
 
@@ -13,9 +16,21 @@ const serverPath = isDev
     ? path.join(__dirname, 'server.py')
     : path.join(process.resourcesPath, serverBin)
 
+function findFreePort(){
+    return new Promise((resolve, reject) => {
+        const server = net.createServer()
+        server.listen(0, '127.0.0.1', () => {
+            const port = server.address().port
+            APIPort = port
+            server.close(() => resolve(port))
+        })
+        server.on('error', reject)
+    })
+}
+
 // Starts python server used for ytb conversion
 // Callback is called after success and error
-function startPython(callback) {
+async function startPython(port, callback) {
     let callbackCalled = false
     function safeCallback() {
         if (!callbackCalled) {
@@ -24,15 +39,19 @@ function startPython(callback) {
         }
     }
 
+    const env = {
+        ...process.env, PYTHONUNBUFFERED: '1', PORT: port 
+    }
+
     if (isDev) {
         pythonProcess = spawn('python', [serverPath], {
             cwd: __dirname,
-            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+            env
         })
     } else {
         pythonProcess = spawn(serverPath, [], {
             cwd: process.resourcesPath,
-            env: { ...process.env, PYTHONUNBUFFERED: '1' }
+            env
         })
     }
 
@@ -54,20 +73,23 @@ function startPython(callback) {
             safeCallback()
         }
     })
-    setTimeout(safeCallback, 5000)
+    setTimeout(safeCallback, 3000)
 }
 // Keeps the py server alive
 // Sometimes it just stops listening to requests??
 async function ensureServer(){
-    try {
-        await fetch('http://localhost:5000/health', {signal: AbortSignal.timeout(2000)})
-        return // All good
-    } catch (error) {
-        //if server is running we kill it
-        if(pythonProcess) pythonProcess.kill(); 
-        // We then start a new instance
-        await new Promise(resolve => startPython(resolve))
-    }
+    fetch(`http://localhost:${APIPort}/health`, {signal: AbortSignal.timeout(2000)})
+        .then(res => res.json())
+        .then(data => {
+            console.log("server ensured:", data.server_status)
+        })
+        .catch(async err => {
+            console.log("server ensured with error:", err.status)
+            //if server is running we kill it
+            if(pythonProcess) pythonProcess.kill(); 
+            // We then start a new instance
+            await new Promise(resolve => startPython(APIPort, resolve))
+        })
 }
 
 function createWindow() {
@@ -80,7 +102,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      webviewTag: true
     }
   })
 
@@ -88,8 +111,6 @@ function createWindow() {
   if(isDev)
     mainWindow.webContents.openDevTools()
 }
-
-
 
 ipcMain.handle('choose-folder', async () =>{
     const defaultPath = app.getPath('downloads')
@@ -101,9 +122,52 @@ ipcMain.handle('choose-folder', async () =>{
     return result.filePaths[0] ?? defaultPath
 })
 
-app.whenReady().then(() => {
-  startPython(createWindow)
-  keepAlive = setInterval(ensureServer, 60000) //ensure the server responds every minute
+ipcMain.handle('get-apple-music-preload-path', () => {
+  return `file:///${path.join(__dirname, 'preload_apple-music.js').replace(/\\/g, '/')}`
+})
+
+const selectionPath = path.join(app.getPath('userData'), 'selection.json')
+
+function readSelection() {
+  try {
+    console.log("selectionpath", selectionPath)
+    return JSON.parse(fs.readFileSync(selectionPath, 'utf-8'))
+  } catch (_) {
+    return []
+  }
+}
+
+function writeSelection(selection) {
+  fs.writeFileSync(selectionPath, JSON.stringify(selection, null, 2))
+}
+
+ipcMain.handle('get-selection', () => {
+  return readSelection()
+})
+
+ipcMain.handle('add-song', (event, song) => {
+  const selection = readSelection()
+  const id = `${song.title}-${song.artist}`.toLowerCase().replace(/\s+/g, '-')
+
+  // Évite les doublons si on clique deux fois sur la même chanson
+  if (selection.some(s => s.id === id)) return selection
+
+  selection.push({ ...song, id, addedAt: new Date().toISOString() })
+  writeSelection(selection)
+  return selection
+})
+
+ipcMain.handle('remove-song', (event, id) => {
+  const selection = readSelection().filter(s => s.id !== id)
+  writeSelection(selection)
+  return selection
+})
+
+app.whenReady().then(async () => {
+    APIPort = await findFreePort()
+    process.env.API_PORT = APIPort
+    startPython(APIPort, createWindow)
+    keepAlive = setInterval(ensureServer, 60000) //ensures the server responds every minute
 })
 
 app.on('window-all-closed', () => {

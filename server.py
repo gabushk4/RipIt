@@ -4,20 +4,24 @@ Requiert : pip install flask flask-cors
 Requiert : ffmpeg installé sur le système
 """
 
-import subprocess, tempfile, shutil, os, yt_dlp, queue, threading, sqlite3, uuid, json, sys
+import subprocess, tempfile, shutil, os, yt_dlp, queue, threading, sqlite3, uuid, json, sys, traceback
 from pathlib import Path
 from flask import Flask, request, send_file, jsonify, json, Response, stream_with_context
 from flask_cors import CORS
 
+import functools
+print = functools.partial(print, flush=True) #So that every prints are flushed
 
 app = Flask(__name__)
 
-if getattr(sys, 'frozen', False):
-    base_dir = os.path.join(os.path.expanduser('~'), '.ripit') # Uses AppData
+is_frozen = getattr(sys, 'frozen', False)
+if is_frozen:
+    base_dir = os.path.join(os.path.expanduser('~'), '.ripit')
 else:
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 
 os.makedirs(base_dir, exist_ok=True)
+
 DB_FILE = os.path.join(base_dir, 'ripit.db')
 
 progress_queues = {}
@@ -25,7 +29,7 @@ job_results = {}
 
 CORS(app, expose_headers=["Content-Disposition"])  # Permet les requêtes depuis le frontend
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# Config
 SUPPORTED_INPUTS  = {'.flac', '.wav', '.aiff', '.ogg', '.m4a', '.mp3', '.aac', '.wma', '.opus', '.ape'}
 SUPPORTED_OUTPUTS = {'mp3', 'flac', 'aac', 'ogg'}
 SUPPORTED_BITRATES    = {'320k', '256k', '192k', '128k'}
@@ -40,7 +44,7 @@ CODEC_MAP = {
 }
 
 
-# ── Utils ─────────────────────────────────────────────────────────────────────
+# Utils
 def check_ffmpeg():
     """Vérifie que FFmpeg est installé et accessible."""
     # Mode PyInstaller freezé
@@ -56,22 +60,40 @@ def check_ffmpeg():
         raise EnvironmentError("FFmpeg introuvable. Installe-le avec : brew install ffmpeg (Mac) | sudo apt install ffmpeg (Linux) | https://www.gyan.dev/ffmpeg/builds/ (Windows)")
     return result
 
-def build_ffmpeg_cmd(input_path: str, output_path: str, fmt: str, bitrate: str, samplerate: str, channels: str) -> list:
+def build_ffmpeg_cmd(input_path: str, output_path: str, fmt: str, bitrate: str, samplerate: str, channels: str, info = None, thumbnail_path=None) -> list:
     """Construit la commande FFmpeg."""
     codec = CODEC_MAP[fmt]
-    cmd = [
-        check_ffmpeg(),
-        '-y',
-        '-i', input_path,
-        '-vn',
-        '-ar', samplerate,
-        '-ac', channels,
-        '-c:a', codec,
-    ]
+    
+    cmd = [check_ffmpeg(), '-y', '-i', input_path]
+    
+    if thumbnail_path:
+        cmd += ['-i', thumbnail_path]
+    
+    cmd += ['-map', '0:a']
+    if thumbnail_path:
+        cmd += ['-map', '1:v']
+    else:
+        cmd += ['-vn']
+    
+    cmd += ['-ar', samplerate, '-ac', channels, '-c:a', codec]
+    
     if fmt != 'flac':
         cmd += ['-b:a', bitrate]
+    
+    if thumbnail_path:
+        cmd += ['-c:v', 'copy', '-disposition:v', 'attached_pic']
+    
+    if info:
+        if title := info.get('title'):
+            cmd += ['-metadata', f'title={title}']
+        if artist := info.get('uploader') or info.get('channel'):
+            cmd += ['-metadata', f'artist={artist}']
+        if date := info.get('upload_date'):
+            cmd += ['-metadata', f'date={date[:4]}']
+    
     cmd.append(output_path)
     return cmd
+
 def get_db():
     db = sqlite3.connect(DB_FILE) 
     db.row_factory = sqlite3.Row
@@ -91,9 +113,10 @@ def init_db():
         db.commit()
 
 def download_worker(job_id, url, fmt, bitrate, samplerate, channels, output_dir):
+    print("download worker")
     tmp_dir = tempfile.mkdtemp()
     try:
-        raw_path = f"{tmp_dir}/downloaded.%(ext)s"
+        raw_path = tmp_dir.replace('\\', '/') + '/downloaded.%(ext)s'
 
         def download_progress_hook(d):
             if d['status'] == 'downloading':
@@ -109,15 +132,16 @@ def download_worker(job_id, url, fmt, bitrate, samplerate, channels, output_dir)
                     'percent': '0%',
                 })
 
-
         ydl_opts = {
+            # Nouveaux opts requis par la nouvelle version de yt-dlp
+            'js_runtimes': {'node': {'path': None}}, # C:\Program Files\nodejs\ 
+            'extractor_args': {'youtube': {'player-client': ['web']}},
+
             'format': 'bestaudio/best',
             'outtmpl': raw_path,
             'quiet': True,
             'no_warnings': True,
-            # On télécharge le fichier brut sans post-traitement yt-dlp,
-            # on laisse FFmpeg faire la conversion ensuite
-            'postprocessors': [],
+            'postprocessors': [], # Lets ffmpeg do the postprocessing
             'progress_hooks':[download_progress_hook]
         }
 
@@ -128,8 +152,9 @@ def download_worker(job_id, url, fmt, bitrate, samplerate, channels, output_dir)
 
         # Chemin réel du fichier téléchargé
         input_path = os.path.join(tmp_dir, f'downloaded.{downloaded_ext}')
+        print(f"input path: {input_path}")
         if not os.path.exists(input_path):
-            return jsonify({'error': 'Fichier téléchargé introuvable'}), 500
+            raise Exception('Fichier téléchargé introuvable')
 
         # Nom du fichier de sortie basé sur le titre de la vidéo
         safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
@@ -137,8 +162,19 @@ def download_worker(job_id, url, fmt, bitrate, samplerate, channels, output_dir)
         output_filename = f"{safe_title}.{fmt}"
         output_path = os.path.join(tmp_dir, output_filename)
 
+        #thumbnail dl
+        from urllib.request import urlretrieve
+
+        thumbnail_url = info.get('thumbnail')
+        if thumbnail_url:
+            try:
+                thumbnail_path = os.path.join(tmp_dir, 'cover.jpg')
+                urlretrieve(thumbnail_url, thumbnail_path)
+            except Exception as e:
+                print(f"[Thumbnail] Impossible de télécharger : {e}")
+                thumbnail_path = None
         # Conversion
-        cmd = build_ffmpeg_cmd(input_path, output_path, fmt, bitrate, samplerate, channels)
+        cmd = build_ffmpeg_cmd(input_path, output_path, fmt, bitrate, samplerate, channels, info, thumbnail_path)
         print(f"[FFmpeg] {' '.join(cmd)}")
 
         result = subprocess.run(
@@ -150,7 +186,7 @@ def download_worker(job_id, url, fmt, bitrate, samplerate, channels, output_dir)
 
         if result.returncode != 0:
             print(f"[FFmpeg ERROR] {result.stderr}")
-            return jsonify({'error': f'FFmpeg a échoué : {result.stderr[-300:]}'}), 500
+            raise Exception(f'FFmpeg a échoué : {result.stderr[-300:]}')
 
         # Copy in selected output
         try:
@@ -160,7 +196,7 @@ def download_worker(job_id, url, fmt, bitrate, samplerate, channels, output_dir)
             print(f"[Saved] {dest}")
         except Exception as e:
             print(f"[Warning] Impossible de sauvegarder dans {output_dir} : {e}")
-            return jsonify({"error": f"[Warning] Impossible de sauvegarder dans {output_dir} : {e}"}), 500
+            raise Exception(f"[Warning] Impossible de sauvegarder dans {output_dir} : {e}")
 
         # Insert into downloaded videos history
         try:
@@ -178,7 +214,7 @@ def download_worker(job_id, url, fmt, bitrate, samplerate, channels, output_dir)
             pass
         except sqlite3.Error as e:
             print(f"[DB ERROR] {e}")
-            return jsonify({'error': f'Erreur à l\'insertion dans l\'historique : {str(e)}'}), 500
+            raise Exception(f'Erreur à l\'insertion dans l\'historique : {str(e)}')
 
         job_results[job_id] = {
             'status': 'done',
@@ -190,11 +226,13 @@ def download_worker(job_id, url, fmt, bitrate, samplerate, channels, output_dir)
         progress_queues[job_id].put({'phase': 'done', 'done': True})
     
     except Exception as e:
+        print(f"Job[{job_id}] error : {e}")
         job_results[job_id] = {'status': 'error', 'error': str(e)}
+        print(traceback.format_exc())
         progress_queues[job_id].put({'error': str(e), 'done': True})
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# Routes
 @app.route('/health', methods=['GET'])
 def health():
     """Vérifie que le backend et FFmpeg sont opérationnels."""
@@ -205,10 +243,13 @@ def health():
             capture_output=True, text=True
         )
         version_line = version_result.stdout.split('\n')[0]
-        return jsonify({'status': 'ok', 'ffmpeg': ffmpeg_path, 'version': version_line})
+        return jsonify({
+            'server_status': 'ok',
+            'description': "Python server used by RipIt | v2.0",
+            'ffmpeg': ffmpeg_path, 
+            'ffmpeg_version': version_line})
     except EnvironmentError as e:
         return jsonify({'status': 'error', 'error': str(e)}), 500
-
 
 @app.route('/convert', methods=['POST'])
 def convert():
@@ -224,7 +265,7 @@ def convert():
       - output_dir  : (optionnel) chemin local pour sauvegarder en plus
     """
 
-    # ── Validation du fichier ─────────────────────────────────────────────────
+    # Validation du fichier
     if 'file' not in request.files:
         return jsonify({'error': 'Aucun fichier reçu'}), 400
 
@@ -236,7 +277,7 @@ def convert():
     if input_ext not in SUPPORTED_INPUTS:
         return jsonify({'error': f'Format d\'entrée non supporté : {input_ext}'}), 400
 
-    # ── Validation des paramètres ─────────────────────────────────────────────
+    # Validation des paramètres
     fmt        = request.form.get('format', 'mp3')
     bitrate    = request.form.get('bitrate', '320k')
     samplerate = request.form.get('samplerate', '44100')
@@ -252,13 +293,13 @@ def convert():
     if channels not in SUPPORTED_CHANNELS:
         return jsonify({'error': f'Canaux non supportés : {channels}'}), 400
 
-    # ── Vérification FFmpeg ───────────────────────────────────────────────────
+    # Vérification FFmpeg
     try:
         check_ffmpeg()
     except EnvironmentError as e:
         return jsonify({'error': str(e)}), 500
 
-    # ── Conversion ────────────────────────────────────────────────────────────
+    # Conversion
     tmp_dir = tempfile.mkdtemp()
     try:
         # Sauvegarde du fichier uploadé
@@ -285,7 +326,7 @@ def convert():
             print(f"[FFmpeg ERROR] {result.stderr}")
             return jsonify({'error': f'FFmpeg a échoué : {result.stderr[-300:]}'}), 500
 
-        # ── Copie optionnelle dans output_dir ─────────────────────────────────
+        # Copie optionnelle dans output_dir
         if output_dir:
             try:
                 os.makedirs(output_dir, exist_ok=True)
@@ -410,15 +451,30 @@ def history():
             cur = db.cursor()
             rows = cur.execute('''
                 SELECT * FROM history
+                    ORDER BY downloaded_at DESC
             ''').fetchall()
-
-            return jsonify({
-                'history': [dict(row) for row in rows]
-            })
+            history = []
+            history = [
+                {**dict(row), "cover": f"https://img.youtube.com/vi/{row['ytb_id']}/maxresdefault.jpg"}
+                for row in rows
+            ]
+            return jsonify({'history': history}) 
 
     except sqlite3.Error as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/history/<ytb_id>', methods=['GET'])
+def check_history(ytb_id):
+    try:
+        with get_db() as db:
+            row = db.execute(
+                'SELECT * FROM history WHERE ytb_id = ?', [ytb_id]
+            ).fetchone()
+            if row:
+                return jsonify({'found': True, 'entry': dict(row)})
+            return jsonify({'found': False})
+    except sqlite3.Error as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/progress/<job_id>')
 def progress(job_id):
@@ -449,11 +505,13 @@ def result(job_id):
     threading.Timer(5, cleanup).start()
     return jsonify({'status': 'done', 'filename': job['filename']})
 
-# ── Point d'entrée ────────────────────────────────────────────────────────────
+# Point d'entrée
 if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5001))
+
     print("=" * 50)
     print("  RipIt — Backend")
-    print("  http://localhost:5000")
+    print(f"  http://localhost:{port}")
     print("=" * 50)
 
     try:
@@ -470,5 +528,6 @@ if __name__ == '__main__':
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.INFO)
 
-    print("Running on http://127.0.0.1:5000")
-    app.run(debug=False, port=5000, use_reloader=False)
+    
+    print(f"Running on http://127.0.0.1:{port}")    
+    app.run(debug=not is_frozen, port=port, use_reloader=not is_frozen)

@@ -17,6 +17,17 @@
     />
 </head>
 <body>
+    <div id="duplicates-modal-container" style="display: none;">
+      <h3 style="margin: 0 0 8px; color: orange;">Doublon détecté</h3>
+      <p id="duplicates-modal-msg" style="color: #555; margin: 0 0 16px; font-size: 14px;"></p>
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; margin-bottom: 20px; cursor: pointer;">
+        <input type="checkbox" id="duplicates-modal-remember"> Faire de même pour les vidéos suivantes
+      </label>
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button id="duplicates-modal-skip">Ignorer</button>
+        <button id="duplicates-modal-download">Télécharger quand même</button>
+      </div>
+    </div>
     <div id="app">
       <header>
         <p class="subtitle">Convertis des vidéos youtube personnels via FFmpeg et YTdlp</p>
@@ -49,8 +60,8 @@
         <div class="setting-group">
           <label for="format">Format de sortie</label>
           <select id="format">
-            <option value="mp3">MP3</option>
             <option value="flac">FLAC (lossless)</option>
+            <option value="mp3">MP3</option>            
             <option value="aac">AAC</option>
             <option value="ogg">OGG Vorbis</option>
           </select>
@@ -67,9 +78,9 @@
         <div class="setting-group">
           <label for="samplerate">Sample rate</label>
           <select id="samplerate">
-            <option value="44100">44100 Hz (CD)</option>
-            <option value="48000">48000 Hz</option>
             <option value="96000">96000 Hz (Hi-Res)</option>
+            <option value="44100">44100 Hz (CD)</option>
+            <option value="48000">48000 Hz</option>            
           </select>
         </div>
         <div class="setting-group">
@@ -102,16 +113,66 @@
         </div>        
       </div>
       <footer class="subtitle">
-        Fait par the Alkemist
+        <span>Fait par the Alkemist</span>
+        <div class="coffee-btn">
+          <a href="https://buymeacoffee.com/alkemist">Buy me a Coffee</a>
+        </div>
       </footer>
     </div>
 
+    <div id="streaming-tray" class="action-tray">
+      <i 
+        id="apple-music-btn" 
+        class="ph ph-music-notes" 
+        data-target="apple-music-panel"
+        data-onopen="openSelection"
+      ></i>
+    </div>
+
+    <div id="lists-tray" class="action-tray">
+      <i 
+        id="selection-btn" 
+        class="ph ph-queue" 
+        data-target="selection-panel"
+        data-onopen="renderSelection"
+      ></i>
+      <i 
+        id="history-btn" 
+        class="ph ph-clock" 
+        data-target="history"
+        data-onopen="renderHistory"
+      ></i>
+    </div>
+
+    <!-- displays apple music web player view -->
+    <div class="side-panel" id="apple-music-panel">      
+      <div class="webview-container" id="apple-music-webview-container">
+        <webview 
+          id="apple-music-webview" 
+          src="https://music.apple.com"          
+        />
+      </div>
+      <button class="panel-close-btn left-side"><i class="ph ph-x"></i></button>
+    </div>
+
+    <!-- displays list of songs selected from streaming provider-->
+    <div class="side-panel" id="selection-panel">
+      <button class="panel-close-btn"><i class="ph ph-x"></i></button>
+      <div id="selection-list-container">
+        <h2>Sélection</h2>
+        <p class="subtitle">...à télécharger</p>
+        <div id="selection-list">
+
+        </div>
+      </div>
+    </div>
+
     <!-- display historic of videos downloaded -->   
-    <div id="history">    
-      <i id="history-btn" class="ph ph-clock"></i>
+    <div class="side-panel" id="history">    
+      <button class="panel-close-btn"><i class="ph ph-x"></i></button>
       <div id="history-list-container">
         <h2>Historique</h2>
-        <p class="subtitle">L'historique des vidéos téléchargées</p>
+        <p class="subtitle">...des vidéos téléchargées</p>
         <div id="history-list">
 
         </div>

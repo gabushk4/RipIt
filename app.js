@@ -1,7 +1,10 @@
 'use strict';
 
 const AUDIO_EXTS = ['flac', 'wav', 'aiff', 'ogg', 'm4a', 'mp3', 'aac', 'wma', 'opus', 'ape'];
-const API_BASE = 'http://localhost:5000';
+const API_BASE = window.electronAPI.API_BASE_URL
+window.electronAPI.getAppleMusicPreloadPath().then(preloadPath => {
+  document.getElementById('apple-music-webview').setAttribute('preload', preloadPath)
+})
 
 let links = [];
 
@@ -21,45 +24,95 @@ const formatSel   = document.getElementById('format');
 const bitrateGroup = document.getElementById('bitrate-group');
 const dropArea     = document.getElementById('drop-area')
 const historyList = document.getElementById('history-list')
+const selectionList = document.getElementById('selection-list')
+const duplicatesModal = document.getElementById('duplicates-modal-container')
+const selectionBtn = document.getElementById('selection-btn')
+const histBtn = document.getElementById('history-btn')
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function formatSize(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
-}
-
 function uid() {
   return Math.random().toString(36).slice(2);
 }
 
-async function getHistory(){
-  // Loading state
-  historyList.innerHTML = `
-    <div style="display: flex; justify-content: center; align-items: center; height:100%; ">
-      <div class="spinner"></div>
-    </div>
-  `
-  const res = await fetch(`${API_BASE}/history`)    
+function formatTimestamp(timestamp){
+  const now = new Date();
+  const then = new Date(timestamp.replace(' ', 'T'));
+  const diffMs = now - then;
+  const diffMin = diffMs / 60000;
+  const diffH   = diffMs / 3600000;
+  const diffD   = diffMs / 86400000;
+
+  if (diffD > 1) {
+    // Plus d'un jour → date seulement
+    return then.toLocaleDateString('fr-CA', { year: 'numeric', month: 'long', day: 'numeric' });
+  } else if (diffH >= 1) {
+    // Moins d'un jour → heure seulement
+    return then.toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' });
+  } else {
+    // Moins d'une heure → minutes
+    const m = Math.max(1, Math.round(diffMin));
+    return `il y a ${m} minute${m > 1 ? 's' : ''}`;
+  }
+}
+
+async function getHistory(apiBase){  
+  const res = await fetch(`${apiBase}/history`)    
   const data = await res.json()
 
-  console.log("history:", data.history)
+  return data.history;  
+}
 
-  if(data.history.length > 0)
-    historyList.innerHTML = `
-      ${data.history.map(video =>`
-        <div class="history-line">
-          <span class="line-title">${video.title}</span>
-          <span class="line-timestamp">${video.downloaded_at}</span>
-        </div>
-      `).join('')}
-    `
-  else
-    historyList.innerHTML = `
-      <div>
-        <p>Commencez à télécharger!</p>
-      </div>
-    `
+async function verifyDownloadHistory(videoId, history){
+  history = Object.values(history).flat()
+  let video = history.find(v => v.ytb_id === videoId)
+  return video
+}
+
+function extractVideoId(url){
+  let videoId = null;
+
+    if (url.includes("v=")) {
+      // Search bar format : youtube.com/watch?v=ID&list=...
+      const match = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+      videoId = match ? match[1] : null;
+    }
+    else if (url.includes("youtu.be/")) {
+      // Share format : youtu.be/ID?si=...
+      const match = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+      videoId = match ? match[1] : null;
+    }
+    else if (url.includes("/shorts/")) {
+      // Shorts format : youtube.com/shorts/ID
+      const match = url.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+      videoId = match ? match[1] : null;
+    }
+    else if (url.includes("/embed/")) {
+      // Embed format : youtube.com/embed/ID
+      const match = url.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+      videoId = match ? match[1] : null;
+    }
+
+    return videoId
+}
+
+function generateCleanUrl(url, onSuccess = ()=>{}, onError = ()=>{}){
+  // Extract video ID
+    let videoId = extractVideoId(url)
+
+    if (!videoId) {
+      onError()
+      return null;
+    }
+    else{
+      onSuccess()
+    }
+
+    // Creating clean url
+    const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    console.log("videoId:", videoId);
+    console.log("cleanUrl:", cleanUrl);
+
+    return cleanUrl
 }
 
 // ── Input management ───────────────────────────────────────────────────────────
@@ -80,7 +133,7 @@ function clearFile(){
   document.getElementById('drop-area').style.display = 'block';
 }
 
-// ── Render ────────────────────────────────────────────────────────────────────
+// Renders
 async function renderThumbnail(url) {
   //returns the infos of the video
   const container = document.getElementById('video-infos');
@@ -98,6 +151,7 @@ async function renderThumbnail(url) {
 
   try {
     const formData = new FormData();
+    convertBtn.disabled = false
     formData.append('url', url);
 
     const res = await fetch(`${API_BASE}/info`, { method: 'POST', body: formData });
@@ -171,6 +225,84 @@ function hideInputError(){
   document.getElementById("message-container").style.display = "none";
 }
 
+async function renderHistory(){
+  // Loading state
+  historyList.innerHTML = `
+    <div style="display: flex; justify-content: center; align-items: center; height:100%; ">
+      <div class="spinner"></div>
+    </div>
+  `
+
+  const history = await getHistory(API_BASE)
+  console.log(`cover: ${history.cover}`)
+
+  if(history.length > 0)
+    historyList.innerHTML = `
+      ${history.map(video =>`
+        <div class="list-line">
+          <img
+            src=${video.cover}
+            class="line-cover"
+          />
+          <div class="line-container">            
+            <span class="line-title">${video.title}</span>
+            <span class="line-timestamp">${formatTimestamp(video.downloaded_at)}</span>
+          </div>
+          
+        </div>
+      `).join('')}
+    `
+  else
+    historyList.innerHTML = `
+      <div>
+        <p>Commencez à télécharger!</p>
+      </div>
+    `
+}
+
+async function renderSelection() {
+  //loading
+  selectionList.innerHTML = `
+    <div style="display: flex; justify-content: center; align-items: center; height:100%; ">
+      <div class="spinner"></div>
+    </div>
+  `
+  const selection = await window.electronAPI.getSelection()
+  console.log('Sélection actuelle:', selection)
+  if(selection.length > 0)
+    selectionList.innerHTML = `
+    ${
+      selection.map(song =>`
+        <div class="list-line">
+          <img
+            src=${song.cover}
+            class="line-cover"
+          />
+          <div class="line-container">            
+            <span class="line-title">${song.title}</span>
+            <span class="line-artist">${song.artist}</span>
+            <span class="line-timestamp">${song.duration}</span>
+          </div>          
+        </div>
+      `)
+    }
+    `
+  else{
+    selectionList.innerHTML = `
+      <div>
+        <p>Commencez à sélectionner dans votre plateforme de streaming!</p>
+      </div>
+    `
+  }
+    
+}
+
+function openSelection(){
+  renderSelection()
+  const selectPanel = document.getElementById('selection-panel')
+  selectPanel.classList.toggle('visible')
+}
+
 // Url input 
 let debounceTimer;
 
@@ -185,44 +317,16 @@ let debounceTimer;
       return;
     }
 
-    // Extract video ID
-    let videoId = null;
-
-    if (url.includes("v=")) {
-      // Search bar format : youtube.com/watch?v=ID&list=...
-      const match = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
-      videoId = match ? match[1] : null;
-    }
-    else if (url.includes("youtu.be/")) {
-      // Share format : youtu.be/ID?si=...
-      const match = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
-      videoId = match ? match[1] : null;
-    }
-    else if (url.includes("/shorts/")) {
-      // Shorts format : youtube.com/shorts/ID
-      const match = url.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
-      videoId = match ? match[1] : null;
-    }
-    else if (url.includes("/embed/")) {
-      // Embed format : youtube.com/embed/ID
-      const match = url.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
-      videoId = match ? match[1] : null;
-    }
-
-    if (!videoId) {
-      renderInputError("Lien invalide");
-      return;
-    }
-    else{
+    const onGenerateSuccess = ()=>{
       hideInputError()
     }
 
-    // URL propre et canonique
-    const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    console.log("videoId:", videoId);
-    console.log("cleanUrl:", cleanUrl);
+    const onGenerateError = () =>{
+      renderInputError("Lien invalide")
+      return
+    }
 
-    e.target.value = cleanUrl 
+    let cleanUrl = generateCleanUrl(url, onGenerateSuccess, onGenerateError)
 
     debounceTimer = setTimeout(() => renderThumbnail(cleanUrl), 800);
   });
@@ -256,7 +360,7 @@ async function downloadSingle(url, format, bitrate, samplerate, channels, title,
       throw new Error('Impossible de contacter le serveur')
   }
 
-const { job_id } = result
+  const { job_id } = result
   
   return job_id  
 }
@@ -279,7 +383,7 @@ async function startDownload() {
   // Construit la queue : soit le txt, soit l'input URL unique
   const queue = links.length > 0
     ? links.map(url => ({ url, title: '' }))
-    : [{ url: urlInput.value.trim(), title: document.getElementById('video-title').textContent.trim() }];
+    : [{ url: generateCleanUrl(urlInput.value.trim()), title: document.getElementById('video-title').textContent.trim() }];
 
   const total = queue.length;
   let done = 0;
@@ -306,10 +410,10 @@ async function startDownload() {
         const eventSource = new EventSource(`${API_BASE}/progress/${job_id}`)
 
         eventSource.onopen = () => console.log("SSE connecte", job_id)
-        eventSource.onerror = (e) => console.log("SSE erreur", e)
 
         eventSource.onmessage = async (e) => {
           const data = JSON.parse(e.data)
+          console.log("SSE data", data)
           if (data.phase === 'downloading') {
             phaseText.textContent = `Téléchargement — ${data.eta}`
             progressFill.style.width = data.percent;
@@ -318,19 +422,40 @@ async function startDownload() {
             phaseText.textContent = `Conversion en cours...`
             phaseText.style.color = "orange"
           } else if (data.done) {
+            console.log("dl done data: ", data)
+            let message = "Complété"
             phaseText.style.color = "#888"
+            if(data.error){
+              message = "Incomplété" 
+              phaseText.style.color = "red"
+            }
+            
             progressFill.style.background = "#378ADD"
             progressFill.style.width = "0%";
-            phaseText.textContent = `Complété`
+            phaseText.textContent = message
             eventSource.close()
-            await fetch(`${API_BASE}/result/${job_id}`) // cleanup serveur
-            resolve()
-            done++
+            fetch(`${API_BASE}/result/${job_id}`) // cleanup serveur
+              .then(res => res.json())
+              .then(data => {
+                console.log("resultat de la job", data)
+                if(data.status == `done`){
+                  done++
+                  resolve()                                    
+                }
+                else{
+                  reject( Error("Erreur au telechargement de", item.title))
+                }           
+              })
+              .catch(err=>{
+                console.log("Erreur au cleanup de la job", err)
+                throw Error("Erreur au cleanup de la job : ", err.toString())
+              })
+            
           }
         }
-        eventSource.onerror = () => {
+        eventSource.onerror = (e) => {
           eventSource.close()
-          reject(new Error('Connexion SSE perdue'))
+          reject(new Error('Connexion SSE perdue : ', e))
         }
       })
     } catch (err) {
@@ -364,17 +489,85 @@ clearUrlBtn.addEventListener('mouseenter', function(e) {
 clearUrlBtn.addEventListener('mouseleave', function(e) {
   this.classList.replace('ph-fill', 'ph')
 })
+document.querySelectorAll('.action-tray i').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const panel = document.getElementById(btn.dataset.target)
+    console.log('open panel', panel.id)
+    if (!panel) return
+
+    panel.classList.toggle('visible')
+
+    if (panel.classList.contains('visible') && btn.dataset.onopen) {
+      const fn = window[btn.dataset.onopen]
+      if (typeof fn === 'function') fn()
+    }
+  })
+})
+document.querySelectorAll('.panel-close-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.closest('.side-panel').classList.remove('visible')
+  })
+})
 
 // Dropzone
-function handleFile(file) {
+function askDuplicate(title) {
+  const MAX_TITLE_LGT = 24
+  if(title.length > MAX_TITLE_LGT){
+    title = title.substring(0, MAX_TITLE_LGT)
+    title += '...'
+  }
+  return new Promise(resolve => {
+    document.getElementById('duplicates-modal-msg').textContent =
+      `"${title}" a déjà été téléchargé. Que voulez-vous faire?`;
+    duplicatesModal.style.display = 'flex';
+
+    const cleanup = (download) => {
+      const rememberCb = document.getElementById('duplicates-modal-remember')
+      const remember = rememberCb.checked;
+      duplicatesModal.style.display = 'none';
+      rememberCb.checked = false;
+      resolve({ download, remember });
+    };
+
+    document.getElementById('duplicates-modal-download').onclick = () => cleanup(true);
+    document.getElementById('duplicates-modal-skip').onclick    = () => cleanup(false);
+  });
+}
+
+async function handleFile(file) {
   if (!file || !file.name.endsWith('.txt')) return;
 
+  const history = await getHistory(API_BASE)
+
   const reader = new FileReader();
-  reader.onload = (e) => {
-    const urls = e.target.result
-      .split('\n')
-      .map(l => l.trim())
-      .filter(l => l.startsWith('http'));
+  reader.onload = async (e) => {
+
+    let bulkAction = null; // null = pas encore décidé
+
+    const urls = [];
+    for (const l of e.target.result.split('\n')) {
+      const videoId = extractVideoId(l);
+      const video = await verifyDownloadHistory(videoId, history);
+      
+      if (video) {
+        console.log(`video found:`, video)
+        let download;
+
+        if (bulkAction !== null) {
+          // User checked remember then we do the same for this link
+          download = bulkAction;
+        } else {
+          const { download: d, remember } = await askDuplicate(video.title);
+          download = d;
+          if (remember) bulkAction = d;
+        }
+
+        if (!download) continue; // ignore this link
+      }
+
+      const cleanUrl = generateCleanUrl(l.trim());
+      if (cleanUrl != null) urls.push(cleanUrl);
+    }
 
     document.getElementById('file-name').textContent = file.name;
     document.getElementById('file-count').textContent =
@@ -382,13 +575,12 @@ function handleFile(file) {
     document.getElementById('drop-area').style.display = 'none';
     document.getElementById('file-result').style.display = 'flex';
 
-    if(urls.length > 1){
+    if(urls.length > 0){
       links = urls
-      //Afficher les actions
+      // Display actions
       actions.style.display = 'flex';
       convertBtn.textContent = "Télécharger les vidéos"
     }
-    // urls est prêt pour downloadMany(urls, options)
   };
   reader.readAsText(file);
 }
@@ -402,20 +594,6 @@ dropArea.addEventListener('drop', (e) => {
 
 // Clicks
 document.getElementById('txt-input').addEventListener('change', (e) => handleFile(e.target.files[0]));
-
-// Manages the history component being slid in and out
-const histBtn = document.getElementById('history-btn')
-histBtn.addEventListener('click', ()=>{
-  // Lets fetch the users history
-  getHistory()
-
-  const historyMenu = document.getElementById("history")
-  historyMenu.classList.toggle('visible')
-  histBtn.classList.contains('ph-clock')
-    ? histBtn.classList.replace('ph-clock', 'ph-x')
-    : histBtn.classList.replace('ph-x', 'ph-clock') 
-  
-})
 
 // Reset
 document.getElementById('clear-files-btn').addEventListener('click', clearFile);

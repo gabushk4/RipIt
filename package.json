@@ -1,7 +1,9 @@
 {
   "name": "ripit",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "main": "main.js",
+  "author":"alkemist",
+  "description": "something",
   "scripts": {
     "start": "electron .",
     "dev": "electronmon .",
@@ -9,19 +11,17 @@
     "build:mac": "electron-builder --mac"
   },
   "electronmon": {
-    "watch": [
+    "patterns": [
+      "!data/**", 
+      "!**.db",
       "*.js",
       "*.html",
       "*.css",
       "server.py"
-    ],
-    "ignore": [
-      "**/*.db",
-      "data/**"
-    ]
+    ]    
   },
   "build": {
-    "asar":false,
+    "asar":true,
     "appId": "com.ripit.app",
     "productName": "RipIt",
     "files": [

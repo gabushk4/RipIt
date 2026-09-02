@@ -1,0 +1,19 @@
+## WINDOWS
+
+# 1. Build Python server
+pyinstaller --onefile --distpath resources/win server.py --add-binary "bin/win/ffmpeg.exe;."
+
+# 2. Build Electron App
+npm run build:win
+
+Then go to dist/win-unpacked and click on RipIt.exe and enjoy!
+
+## MAC
+
+# 1. Build Python server
+pyinstaller --onefile --distpath resources/mac server.py --add-binary "bin/mac/ffmpeg:."
+
+# 2. Build Electron App
+npm run build:mac
+
+Then go to dist/mac and click on RipIt.app and enjoy!
